@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -32,7 +32,7 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
-     
+
       - name: Create Android project
         shell: bash
         run: |
@@ -63,12 +63,14 @@ jobs:
           cat > build.gradle.kts <<'EOF'
           plugins {
               id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
           }
           EOF
 
           cat > app/build.gradle.kts <<'EOF'
           plugins {
               id("com.android.application")
+              id("org.jetbrains.kotlin.android")
           }
 
           android {
@@ -110,6 +112,7 @@ jobs:
                       android:name=".PlaybackService"
                       android:exported="false"
                       android:foregroundServiceType="mediaPlayback" />
+
               </application>
           </manifest>
           EOF
@@ -136,11 +139,11 @@ jobs:
           import android.net.Uri
           import android.os.Bundle
           import android.view.Gravity
-          import android.view.ViewGroup
           import android.widget.*
-          import android.graphics.Typeface
+          import android.view.ViewGroup
 
           class MainActivity : Activity() {
+
               private var song: Uri? = null
               private lateinit var songLabel: TextView
               private lateinit var duration: EditText
@@ -151,7 +154,10 @@ jobs:
               private val fg = Color.WHITE
               private val accent = Color.rgb(128, 203, 196)
 
-              private fun label(text: String, size: Float = 16f): TextView {
+              private fun label(
+                  text: String,
+                  size: Float = 16f
+              ): TextView {
                   return TextView(this).apply {
                       this.text = text
                       textSize = size
@@ -161,7 +167,10 @@ jobs:
                   }
               }
 
-              private fun button(text: String, action: () -> Unit): Button {
+              private fun button(
+                  text: String,
+                  action: () -> Unit
+              ): Button {
                   return Button(this).apply {
                       this.text = text
                       setTextColor(Color.BLACK)
@@ -170,7 +179,10 @@ jobs:
                   }
               }
 
-              private fun field(value: String, hintText: String): EditText {
+              private fun field(
+                  value: String,
+                  hintText: String
+              ): EditText {
                   return EditText(this).apply {
                       setText(value)
                       hint = hintText
@@ -202,50 +214,68 @@ jobs:
                   songLabel = label("هنوز آهنگی انتخاب نشده")
                   root.addView(songLabel)
 
-                  root.addView(button("انتخاب آهنگ از گوشی") {
-                      val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                          addCategory(Intent.CATEGORY_OPENABLE)
-                          type = "audio/*"
+                  root.addView(
+                      button("انتخاب آهنگ از گوشی") {
+                          val intent = Intent(
+                              Intent.ACTION_OPEN_DOCUMENT
+                          ).apply {
+                              addCategory(Intent.CATEGORY_OPENABLE)
+                              type = "audio/*"
+                          }
+
+                          startActivityForResult(intent, 100)
                       }
-                      startActivityForResult(intent, 100)
-                  })
+                  )
 
                   root.addView(label("مدت پخش آهنگ (دقیقه)"))
+
                   duration = field("30", "مثلاً 30")
                   root.addView(duration)
 
                   root.addView(label("مرحله دوم · صدای هنگام خواب"))
+
                   noise = Spinner(this)
+
                   val options = arrayOf(
                       "نویز سفید",
                       "نویز صورتی",
                       "نویز قهوه‌ای",
                       "صدای سینوسی"
                   )
+
                   noise.adapter = ArrayAdapter(
                       this,
                       android.R.layout.simple_spinner_dropdown_item,
                       options
                   )
+
                   root.addView(noise)
 
                   root.addView(label("فرکانس صدای سینوسی (هرتز)"))
+
                   frequency = field("200", "مثلاً 200")
                   root.addView(frequency)
 
-                  root.addView(label(
-                      "پس از پایان زمان، صدا به‌آرامی تغییر می‌کند."
-                  ))
+                  root.addView(
+                      label("پس از پایان زمان، آهنگ طی ۵ ثانیه محو می‌شود.")
+                  )
 
-                  root.addView(button("شروع پخش") {
-                      startPlayback()
-                  })
+                  root.addView(
+                      button("شروع پخش") {
+                          startPlayback()
+                      }
+                  )
 
-                  root.addView(button("توقف کامل") {
-                      val i = Intent(this, PlaybackService::class.java)
-                      i.action = "STOP"
-                      startService(i)
-                  })
+                  root.addView(
+                      button("توقف کامل") {
+                          val intent = Intent(
+                              this,
+                              PlaybackService::class.java
+                          )
+                          intent.action = "STOP"
+                          startService(intent)
+                      }
+                  )
 
                   val scroll = ScrollView(this)
                   scroll.addView(root)
@@ -257,13 +287,19 @@ jobs:
                   resultCode: Int,
                   data: Intent?
               ) {
-                  super.onActivityResult(requestCode, resultCode, data)
+                  super.onActivityResult(
+                      requestCode,
+                      resultCode,
+                      data
+                  )
 
-                  if (requestCode == 100 &&
+                  if (
+                      requestCode == 100 &&
                       resultCode == RESULT_OK &&
                       data?.data != null
                   ) {
                       song = data.data
+
                       try {
                           contentResolver.takePersistableUriPermission(
                               song!!,
@@ -271,13 +307,14 @@ jobs:
                           )
                       } catch (_: Exception) {}
 
-                      songLabel.text = song?.lastPathSegment
-                          ?: "آهنگ انتخاب شد"
+                      songLabel.text =
+                          song?.lastPathSegment ?: "آهنگ انتخاب شد"
                   }
               }
 
               private fun startPlayback() {
                   val selectedSong = song
+
                   if (selectedSong == null) {
                       Toast.makeText(
                           this,
@@ -287,10 +324,17 @@ jobs:
                       return
                   }
 
-                  val minutes = duration.text.toString().toLongOrNull()
-                  val hz = frequency.text.toString().toIntOrNull()
+                  val minutes =
+                      duration.text.toString().toLongOrNull()
 
-                  if (minutes == null || minutes < 1 || minutes > 1440) {
+                  val hz =
+                      frequency.text.toString().toIntOrNull()
+
+                  if (
+                      minutes == null ||
+                      minutes < 1 ||
+                      minutes > 1440
+                  ) {
                       Toast.makeText(
                           this,
                           "مدت پخش باید بین ۱ تا ۱۴۴۰ دقیقه باشد",
@@ -308,7 +352,10 @@ jobs:
                       return
                   }
 
-                  val i = Intent(this, PlaybackService::class.java).apply {
+                  val intent = Intent(
+                      this,
+                      PlaybackService::class.java
+                  ).apply {
                       action = "START"
                       putExtra("song", selectedSong.toString())
                       putExtra("duration", minutes * 60_000L)
@@ -317,7 +364,7 @@ jobs:
                   }
 
                   try {
-                      startForegroundService(i)
+                      startForegroundService(intent)
                   } catch (e: Exception) {
                       Toast.makeText(
                           this,
@@ -347,11 +394,16 @@ jobs:
           import kotlin.math.sin
 
           class PlaybackService : Service() {
+
               private val handler = Handler(Looper.getMainLooper())
+
               private var player: MediaPlayer? = null
               private var track: AudioTrack? = null
               private var noiseThread: Thread? = null
-              @Volatile private var running = false
+
+              @Volatile
+              private var running = false
+
               private var lastBrown = 0.0
               private var lastPink = 0.0
               private var phase = 0.0
@@ -363,6 +415,7 @@ jobs:
                   flags: Int,
                   startId: Int
               ): Int {
+
                   if (intent?.action == "STOP") {
                       stopPlayback()
                       return START_NOT_STICKY
@@ -371,11 +424,26 @@ jobs:
                   if (intent?.action == "START") {
                       stopAudioOnly()
                       createNotification()
-                      val uri = intent.getStringExtra("song") ?: return START_NOT_STICKY
-                      val duration = intent.getLongExtra("duration", 1_800_000L)
-                      val noise = intent.getIntExtra("noise", 1)
-                      val frequency = intent.getIntExtra("frequency", 200)
-                      playSongThenNoise(uri, duration, noise, frequency)
+
+                      val uri =
+                          intent.getStringExtra("song")
+                              ?: return START_NOT_STICKY
+
+                      val duration =
+                          intent.getLongExtra("duration", 1800000L)
+
+                      val noise =
+                          intent.getIntExtra("noise", 1)
+
+                      val frequency =
+                          intent.getIntExtra("frequency", 200)
+
+                      playSongThenNoise(
+                          uri,
+                          duration,
+                          noise,
+                          frequency
+                      )
                   }
 
                   return START_NOT_STICKY
@@ -390,16 +458,20 @@ jobs:
                           "SleepTune playback",
                           NotificationManager.IMPORTANCE_LOW
                       )
+
                       getSystemService(NotificationManager::class.java)
                           .createNotificationChannel(channel)
                   }
 
-                  val notification = Notification.Builder(this, channelId)
-                      .setContentTitle("SleepTune")
-                      .setContentText("پخش صدا فعال است")
-                      .setSmallIcon(android.R.drawable.ic_media_play)
-                      .setOngoing(true)
-                      .build()
+                  val notification =
+                      Notification.Builder(this, channelId)
+                          .setContentTitle("SleepTune")
+                          .setContentText("پخش صدا فعال است")
+                          .setSmallIcon(
+                              android.R.drawable.ic_media_play
+                          )
+                          .setOngoing(true)
+                          .build()
 
                   startForeground(1, notification)
               }
@@ -412,21 +484,38 @@ jobs:
               ) {
                   try {
                       player = MediaPlayer().apply {
-                          setDataSource(this@PlaybackService, android.net.Uri.parse(uri))
+                          setDataSource(
+                              this@PlaybackService,
+                              android.net.Uri.parse(uri)
+                          )
+
                           setAudioAttributes(
                               AudioAttributes.Builder()
-                                  .setUsage(AudioAttributes.USAGE_MEDIA)
-                                  .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                  .setUsage(
+                                      AudioAttributes.USAGE_MEDIA
+                                  )
+                                  .setContentType(
+                                      AudioAttributes.CONTENT_TYPE_MUSIC
+                                  )
                                   .build()
                           )
+
                           setOnPreparedListener { mp ->
                               mp.start()
-                              val fadeStart = (duration - 5000L).coerceAtLeast(0L)
+
+                              val fadeStart =
+                                  (duration - 5000L).coerceAtLeast(0L)
 
                               handler.postDelayed({
                                   fadeSong(mp, noise, frequency)
                               }, fadeStart)
                           }
+
+                          setOnErrorListener { _, _, _ ->
+                              stopPlayback()
+                              true
+                          }
+
                           prepareAsync()
                       }
                   } catch (_: Exception) {
@@ -440,13 +529,18 @@ jobs:
                   frequency: Int
               ) {
                   val started = System.currentTimeMillis()
+
                   val fade = object : Runnable {
                       override fun run() {
                           if (player !== mp) return
 
-                          val elapsed = System.currentTimeMillis() - started
-                          val volume = (1.0 - elapsed / 5000.0)
-                              .coerceIn(0.0, 1.0).toFloat()
+                          val elapsed =
+                              System.currentTimeMillis() - started
+
+                          val volume =
+                              (1.0 - elapsed / 5000.0)
+                                  .coerceIn(0.0, 1.0)
+                                  .toFloat()
 
                           try {
                               mp.setVolume(volume, volume)
@@ -455,20 +549,34 @@ jobs:
                           if (elapsed < 5000L) {
                               handler.postDelayed(this, 100L)
                           } else {
-                              try { mp.stop() } catch (_: Exception) {}
-                              try { mp.release() } catch (_: Exception) {}
-                              if (player === mp) player = null
+                              try {
+                                  mp.stop()
+                              } catch (_: Exception) {}
+
+                              try {
+                                  mp.release()
+                              } catch (_: Exception) {}
+
+                              if (player === mp) {
+                                  player = null
+                              }
+
                               startNoise(noise, frequency)
                           }
                       }
                   }
+
                   handler.post(fade)
               }
 
-              private fun startNoise(type: Int, frequency: Int) {
+              private fun startNoise(
+                  type: Int,
+                  frequency: Int
+              ) {
                   stopNoise()
 
                   val sampleRate = 44100
+
                   val minBuffer = AudioTrack.getMinBufferSize(
                       sampleRate,
                       AudioFormat.CHANNEL_OUT_MONO,
@@ -478,15 +586,22 @@ jobs:
                   track = AudioTrack.Builder()
                       .setAudioAttributes(
                           AudioAttributes.Builder()
-                              .setUsage(AudioAttributes.USAGE_MEDIA)
-                              .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                              .setUsage(
+                                  AudioAttributes.USAGE_MEDIA
+                              )
+                              .setContentType(
+                                  AudioAttributes.CONTENT_TYPE_MUSIC
+                              )
                               .build()
                       )
                       .setAudioFormat(
-                          AudioFormat.Builder()
-                              .setSampleRate(sampleRate)
-                              .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                              .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                          AudioFormat.Builder()                              .setSampleRate(sampleRate)
+                              .setChannelMask(
+                                  AudioFormat.CHANNEL_OUT_MONO
+                              )
+                              .setEncoding(
+                                  AudioFormat.ENCODING_PCM_16BIT
+                              )
                               .build()
                       )
                       .setBufferSizeInBytes(minBuffer * 2)
@@ -494,8 +609,10 @@ jobs:
                       .build()
 
                   val audio = track ?: return
+
                   audio.setVolume(0.25f)
                   audio.play()
+
                   running = true
 
                   noiseThread = Thread {
@@ -508,37 +625,131 @@ jobs:
                               val value = when (type) {
                                   3 -> {
                                       val s = sin(phase)
-                                      phase += 2.0 * PI * frequency / sampleRate
-                                      if (phase >= 2.0 * PI) phase -= 2.0 * PI
+                                      phase +=
+                                          2.0 * PI * frequency / sampleRate
+
+                                      if (phase >= 2.0 * PI) {
+                                          phase -= 2.0 * PI
+                                      }
+
                                       s
                                   }
 
                                   2 -> {
-                                      val white = random.nextDouble() * 2.0 - 1.0
-                                      lastBrown = (lastBrown + white * 0.02)
-                                          .coerceIn(-1.0, 1.0)
+                                      val white =
+                                          random.nextDouble() * 2.0 - 1.0
+
+                                      lastBrown =
+                                          (lastBrown + white * 0.02)
+                                              .coerceIn(-1.0, 1.0)
+
                                       lastBrown
                                   }
 
                                   1 -> {
-                                      val white = random.nextDouble() * 2.0 - 1.0
-                                      lastPink = 0.98 * lastPink + 0.08 * white
+                                      val white =
+                                          random.nextDouble() * 2.0 - 1.0
+
+                                      lastPink =
+                                          0.98 * lastPink + 0.08 * white
+
                                       lastPink.coerceIn(-1.0, 1.0)
                                   }
 
-                                  else -> random.nextDouble() * 2.0 - 1.0
+                                  else -> {
+                                      random.nextDouble() * 2.0 - 1.0
+                                  }
                               }
 
-                              samples[i] = (value * amplitude)
-                                  .toInt().coerceIn(-32768, 32767).toShort()
+                              samples[i] =
+                                  (value * amplitude)
+                                      .toInt()
+                                      .coerceIn(-32768, 32767)
+                                      .toShort()
                           }
 
                           try {
-                              audio.write(samples, 0, samples.size)
+                              audio.write(
+                                  samples,
+                                  0,
+                                  samples.size
+                              )
                           } catch (_: Exception) {
-    
+                              break
+                          }
+                      }
+                  }.apply {
+                      name = "SleepTuneAudio"
+                      start()
+                  }
+              }
+
+              private fun stopNoise() {
+                  running = false
+
+                  try {
+                      track?.pause()
+                  } catch (_: Exception) {}
+
+                  try {
+                      track?.flush()
+                  } catch (_: Exception) {}
+
+                  try {
+                      track?.stop()
+                  } catch (_: Exception) {}
+
+                  try {
+                      track?.release()
+                  } catch (_: Exception) {}
+
+                  track = null
+                  noiseThread = null
+              }
+
+              private fun stopAudioOnly() {
+                  handler.removeCallbacksAndMessages(null)
+
+                  try {
+                      player?.stop()
+                  } catch (_: Exception) {}
+
+                  try {
+                      player?.release()
+                  } catch (_: Exception) {}
+
+                  player = null
+
+                  stopNoise()
+              }
+
+              private fun stopPlayback() {
+                  stopAudioOnly()
+                  stopForeground(STOP_FOREGROUND_REMOVE)
+                  stopSelf()
+              }
+
+              override fun onDestroy() {
+                  stopAudioOnly()
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SleepTune-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+                             
