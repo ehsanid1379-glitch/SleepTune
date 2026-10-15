@@ -510,6 +510,7 @@ jobs:
                           )
 
                           setOnPreparedListener { mp ->
+                              mp.isLooping = true
                               mp.start()
 
                               val fadeStart =
