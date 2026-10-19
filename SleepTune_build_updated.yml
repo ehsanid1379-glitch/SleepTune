@@ -1,0 +1,571 @@
+name: Build SleepTune APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/sleeptune/app
+          cat > settings.gradle.kts <<'GRADLE'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "SleepTune"
+          include(":app")
+          GRADLE
+
+          cat > build.gradle.kts <<'GRADLE'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          GRADLE
+
+          cat > gradle.properties <<'GRADLE'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          GRADLE
+
+          cat > app/build.gradle.kts <<'GRADLE'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.sleeptune.app"
+              compileSdk = 35
+              defaultConfig {
+                  applicationId = "com.sleeptune.app"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 3
+                  versionName = "1.2"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          GRADLE
+
+          cat > app/src/main/AndroidManifest.xml <<'MANIFEST'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application android:theme="@android:style/Theme.Material.NoActionBar" android:label="SleepTune" android:usesCleartextTraffic="false">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service android:name=".PlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+              </application>
+          </manifest>
+          MANIFEST
+
+          cat > app/src/main/java/com/sleeptune/app/MainActivity.kt <<'KOTLIN'
+          package com.sleeptune.app
+          
+          import android.app.Activity
+          import android.content.Intent
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Path
+          import android.graphics.Typeface
+          import android.net.Uri
+          import android.os.Bundle
+          import android.view.Gravity
+          import android.view.View
+          import android.widget.*
+          import android.graphics.drawable.GradientDrawable
+          import kotlin.math.sin
+          import kotlin.math.PI
+          
+          class MainActivity : Activity() {
+              private var songUri: Uri? = null
+              private val pickSongCode = 77
+              private var playing = false
+              private lateinit var modeGroup: RadioGroup
+              private lateinit var baseSeek: SeekBar
+              private lateinit var diffSeek: SeekBar
+              private lateinit var speedSeek: SeekBar
+              private lateinit var baseLabel: TextView
+              private lateinit var diffLabel: TextView
+              private lateinit var speedLabel: TextView
+              private lateinit var diffTitle: TextView
+              private lateinit var songCheck: CheckBox
+              private lateinit var songButton: Button
+              private lateinit var durationSeek: SeekBar
+              private lateinit var durationLabel: TextView
+              private lateinit var songRange: RangeBar
+              private lateinit var toneRange: RangeBar
+              private lateinit var songPattern: RadioGroup
+              private lateinit var tonePattern: RadioGroup
+              private lateinit var waveL: WaveView
+              private lateinit var waveR: WaveView
+              private lateinit var waveFreq: WaveView
+              private lateinit var songSpeedSeek: SeekBar
+              private lateinit var songSpeedLabel: TextView
+          
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.statusBarColor = Color.rgb(13,16,29)
+                  window.navigationBarColor = Color.rgb(13,16,29)
+                  buildUi()
+              }
+              private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
+              private fun full() = LinearLayout.LayoutParams(-1, -2)
+              private fun title(s:String) = TextView(this).apply {
+                  text=s; textSize=16f; typeface=Typeface.create("sans-serif-medium",Typeface.BOLD)
+                  setTextColor(Color.rgb(196,210,255)); setPadding(0,dp(14),0,dp(4))
+              }
+              private fun label(s:String) = TextView(this).apply { text=s; textSize=14f; setTextColor(Color.WHITE); setPadding(0,dp(3),0,dp(3)) }
+              private fun slider(parent:LinearLayout, name:String, max:Int, initial:Int, onChange:(Int)->Unit):Pair<SeekBar,TextView> {
+                  parent.addView(title(name))
+                  val lab=label("$name: $initial")
+                  val seek=SeekBar(this).apply {
+                      this.max=max; progress=initial
+                      setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                          override fun onProgressChanged(sb:SeekBar?,p:Int,fromUser:Boolean) { lab.text="$name: $p"; if(fromUser) onChange(p) }
+                          override fun onStartTrackingTouch(sb:SeekBar?) {}
+                          override fun onStopTrackingTouch(sb:SeekBar?) {}
+                      })
+                  }
+                  parent.addView(seek,full()); parent.addView(lab,full())
+                  return Pair(seek,lab)
+              }
+              private fun patternGroup():RadioGroup {
+                  val g=RadioGroup(this).apply { orientation=RadioGroup.VERTICAL }
+                  g.addView(RadioButton(this).apply { text="متقارن؛ شدت دو گوش در جهت مخالف"; setTextColor(Color.WHITE); id=View.generateViewId() })
+                  g.addView(RadioButton(this).apply { text="هم‌زمان؛ شدت دو گوش با هم تغییر کند"; setTextColor(Color.WHITE); id=View.generateViewId() })
+                  g.check(g.getChildAt(0).id)
+                  return g
+              }
+              private fun buildUi() {
+                  val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(12),dp(18),dp(24)); setBackgroundColor(Color.rgb(13,16,29)) }
+                  val scroll=ScrollView(this); scroll.addView(root)
+                  root.addView(TextView(this).apply { text="SleepTune"; textSize=29f; gravity=Gravity.CENTER; setTextColor(Color.WHITE); typeface=Typeface.DEFAULT_BOLD },full())
+                  root.addView(TextView(this).apply { text="کنترل فرکانس و شدت صدا"; gravity=Gravity.CENTER; setTextColor(Color.LTGRAY); setPadding(0,dp(4),0,dp(10)) },full())
+                  root.addView(title("نمودار فرکانس"))
+                  waveFreq=WaveView(this); root.addView(waveFreq,LinearLayout.LayoutParams(-1,dp(95)))
+                  root.addView(title("شدت صدای گوش چپ"))
+                  waveL=WaveView(this); root.addView(waveL,LinearLayout.LayoutParams(-1,dp(65)))
+                  root.addView(title("شدت صدای گوش راست"))
+                  waveR=WaveView(this); root.addView(waveR,LinearLayout.LayoutParams(-1,dp(65)))
+          
+                  root.addView(title("حالت صدای فرکانس"))
+                  modeGroup=RadioGroup(this).apply { orientation=RadioGroup.VERTICAL }
+                  listOf("فرکانس ثابت؛ صدای یکسان در دو گوش","ترکیبی؛ تغییر تدریجی فرکانس و جابه‌جایی نرم بین گوش‌ها","فرکانس ثابت؛ نوسان شدت صدا").forEachIndexed { i,s ->
+                      modeGroup.addView(RadioButton(this).apply { text=s; id=View.generateViewId(); setTextColor(Color.WHITE); textSize=14f; if(i==0) isChecked=true })
+                  }
+                  root.addView(modeGroup,full())
+                  val bp=slider(root,"فرکانس پایه (Hz)",750,150) { p ->
+                      val base=p+50
+                      diffSeek.max=(base-1).coerceAtLeast(0)
+                      if(diffSeek.progress>diffSeek.max) diffSeek.progress=diffSeek.max
+                      baseLabel.text="فرکانس پایه: $base Hz"
+                      diffLabel.text="اختلاف فرکانس: ${diffSeek.progress} Hz"
+                      updateGraphs(); updatePlaying()
+                  }
+                  baseSeek=bp.first; baseLabel=bp.second
+                  baseLabel.text="فرکانس پایه: 200 Hz"
+                  baseSeek.progress=150
+                  diffTitle=title("اختلاف فرکانس (Hz)")
+                  root.addView(diffTitle)
+                  val dpair=SeekBar(this).apply { max=199; progress=10 }
+                  diffSeek=dpair
+                  diffLabel=label("اختلاف فرکانس: 10 Hz")
+                  root.addView(diffSeek,full()); root.addView(diffLabel,full())
+                  diffSeek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(sb:SeekBar?,p:Int,fromUser:Boolean) { diffLabel.text="اختلاف فرکانس: $p Hz"; if(fromUser){updateGraphs();updatePlaying()} }
+                      override fun onStartTrackingTouch(sb:SeekBar?) {}
+                      override fun onStopTrackingTouch(sb:SeekBar?) {}
+                  })
+                  val sp=slider(root,"سرعت تغییر (ثانیه)",49,24) { p ->
+                      speedLabel.text="سرعت تغییر: ${fmt(0.2+p*9.8/49.0)} ثانیه"; updatePlaying()
+                  }
+                  speedSeek=sp.first; speedLabel=sp.second
+                  speedLabel.text="سرعت تغییر: ${fmt(0.2+speedSeek.progress*9.8/49.0)} ثانیه"
+          
+                  root.addView(title("شدت صدای فرکانس (۰ تا ۱۰۰٪)"))
+                  toneRange=RangeBar(this,20,80) { _,_-> updatePlaying() }
+                  root.addView(toneRange,LinearLayout.LayoutParams(-1,dp(58)))
+                  root.addView(label("نحوه نوسان شدت صدا"))
+                  tonePattern=patternGroup(); root.addView(tonePattern,full())
+                  tonePattern.setOnCheckedChangeListener { _,_-> updatePlaying() }
+          
+                  root.addView(title("آهنگ پیش از فرکانس (اختیاری)"))
+                  songCheck=CheckBox(this).apply { text="ابتدا آهنگ پخش شود"; setTextColor(Color.WHITE) }; root.addView(songCheck)
+                  songButton=Button(this).apply { text="انتخاب آهنگ از گوشی"; setOnClickListener {
+                      val i=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="audio/*" }
+                      startActivityForResult(i,pickSongCode)
+                  } }; root.addView(songButton,full())
+                  val dur=slider(root,"مدت آهنگ (دقیقه)",179,29) { p-> durationLabel.text="مدت آهنگ: ${p+1} دقیقه" }
+                  durationSeek=dur.first; durationLabel=dur.second; durationLabel.text="مدت آهنگ: 30 دقیقه"
+                  root.addView(title("شدت صدای آهنگ (۰ تا ۱۰۰٪)"))
+                  songRange=RangeBar(this,20,80) { _,_-> updatePlaying() }; root.addView(songRange,LinearLayout.LayoutParams(-1,dp(58)))
+                  root.addView(label("نحوه نوسان شدت آهنگ"))
+                  songPattern=patternGroup(); root.addView(songPattern,full())
+                  val songSp=slider(root,"سرعت نوسان آهنگ (ثانیه)",49,24) { p ->
+                      songSpeedLabel.text="سرعت نوسان آهنگ: ${fmt(0.2+p*9.8/49.0)} ثانیه"; updatePlaying()
+                  }
+                  songSpeedSeek=songSp.first; songSpeedLabel=songSp.second
+                  songSpeedLabel.text="سرعت نوسان آهنگ: ${fmt(0.2+songSpeedSeek.progress*9.8/49.0)} ثانیه"
+          
+                  root.addView(Button(this).apply { text="▶ شروع پخش"; textSize=17f; setOnClickListener { startPlayback() } },full())
+                  root.addView(Button(this).apply { text="■ توقف"; textSize=17f; setOnClickListener {
+                      stopService(Intent(this@MainActivity,PlaybackService::class.java)); playing=false
+                      waveFreq.isRunning=false; waveL.isRunning=false; waveR.isRunning=false
+                      Toast.makeText(this@MainActivity,"پخش متوقف شد",Toast.LENGTH_SHORT).show()
+                  } },full())
+                  root.addView(TextView(this).apply {
+                      text="در حالت ترکیبی، اختلاف فرکانس باید از فرکانس پایه کمتر باشد. درصد شدت، دامنه دیجیتال سیگنال است و الزاماً با بلندی ادراک‌شده برابر نیست."
+                      textSize=12f; setTextColor(Color.LTGRAY); setPadding(0,dp(12),0,0)
+                  },full())
+                  modeGroup.setOnCheckedChangeListener { _,_-> updateModeVisibility(); updateGraphs(); updatePlaying() }
+                  updateModeVisibility(); updateGraphs()
+                  setContentView(scroll)
+              }
+              private fun fmt(v:Double)=String.format(java.util.Locale.US,"%.1f",v)
+              private fun updateModeVisibility() {
+                  val mode=modeGroup.checkedRadioButtonId.let { id -> (0 until modeGroup.childCount).firstOrNull { modeGroup.getChildAt(it).id==id } ?: 0 }
+                  diffTitle.visibility=if(mode==1) View.VISIBLE else View.GONE
+                  diffSeek.visibility=if(mode==1) View.VISIBLE else View.GONE
+                  diffLabel.visibility=if(mode==1) View.VISIBLE else View.GONE
+              }
+              private fun updateGraphs() {
+                  val mode=modeGroup.checkedRadioButtonId.let { id -> (0 until modeGroup.childCount).firstOrNull { modeGroup.getChildAt(it).id==id } ?: 0 }
+                  waveFreq.setParams(baseSeek.progress+50,if(mode==1) diffSeek.progress else 0,mode==1)
+                  waveL.setParams(0,toneRange.low,toneRange.high,tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
+                  waveR.setParams(1,toneRange.low,toneRange.high,tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
+              }
+              private fun updatePlaying() {
+                  updateGraphs()
+                  if(!playing) return
+                  val mode=modeGroup.checkedRadioButtonId.let { id -> (0 until modeGroup.childCount).firstOrNull { modeGroup.getChildAt(it).id==id } ?: 0 }
+                  val i=Intent(this,PlaybackService::class.java).apply {
+                      action=PlaybackService.ACTION_UPDATE
+                      putExtra(PlaybackService.EXTRA_BASE,baseSeek.progress+50)
+                      putExtra(PlaybackService.EXTRA_DIFF,if(mode==1) diffSeek.progress else 0)
+                      putExtra(PlaybackService.EXTRA_MODE,mode)
+                      putExtra(PlaybackService.EXTRA_SWAP_MS,secondsMs(speedSeek.progress))
+                      putExtra(PlaybackService.EXTRA_TONE_MIN,toneRange.low)
+                      putExtra(PlaybackService.EXTRA_TONE_MAX,toneRange.high)
+                      putExtra(PlaybackService.EXTRA_TONE_PATTERN,if(tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id) 1 else 0)
+                      putExtra(PlaybackService.EXTRA_SONG_MIN,songRange.low)
+                      putExtra(PlaybackService.EXTRA_SONG_MAX,songRange.high)
+                      putExtra(PlaybackService.EXTRA_SONG_PATTERN,if(songPattern.checkedRadioButtonId==songPattern.getChildAt(1).id) 1 else 0)
+                      putExtra(PlaybackService.EXTRA_SONG_SWAP_MS,secondsMs(songSpeedSeek.progress))
+                  }
+                  startService(i)
+              }
+              private fun secondsMs(p:Int)=(200+p*(9800.0/49.0)).toLong()
+              private fun startPlayback() {
+                  val mode=modeGroup.checkedRadioButtonId.let { id -> (0 until modeGroup.childCount).firstOrNull { modeGroup.getChildAt(it).id==id } ?: 0 }
+                  val base=baseSeek.progress+50; val diff=diffSeek.progress
+                  if(mode==1 && diff>=base) { Toast.makeText(this,"اختلاف فرکانس باید از فرکانس پایه کمتر باشد",Toast.LENGTH_LONG).show(); return }
+                  if(songCheck.isChecked && songUri==null) { Toast.makeText(this,"ابتدا آهنگ را انتخاب کنید یا گزینه‌ی آهنگ را خاموش کنید",Toast.LENGTH_LONG).show(); return }
+                  val i=Intent(this,PlaybackService::class.java).apply {
+                      action=PlaybackService.ACTION_START
+                      putExtra(PlaybackService.EXTRA_BASE,base); putExtra(PlaybackService.EXTRA_DIFF,if(mode==1) diff else 0)
+                      putExtra(PlaybackService.EXTRA_MODE,mode); putExtra(PlaybackService.EXTRA_SWAP_MS,secondsMs(speedSeek.progress))
+                      putExtra(PlaybackService.EXTRA_TONE_MIN,toneRange.low); putExtra(PlaybackService.EXTRA_TONE_MAX,toneRange.high)
+                      putExtra(PlaybackService.EXTRA_TONE_PATTERN,if(tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id) 1 else 0)
+                      putExtra(PlaybackService.EXTRA_SONG_MIN,songRange.low); putExtra(PlaybackService.EXTRA_SONG_MAX,songRange.high)
+                      putExtra(PlaybackService.EXTRA_SONG_PATTERN,if(songPattern.checkedRadioButtonId==songPattern.getChildAt(1).id) 1 else 0)
+                      putExtra(PlaybackService.EXTRA_SONG_SWAP_MS,secondsMs(songSpeedSeek.progress))
+                      putExtra(PlaybackService.EXTRA_SONG,if(songCheck.isChecked) songUri.toString() else "")
+                      putExtra(PlaybackService.EXTRA_DURATION_MS,(durationSeek.progress+1)*60_000L)
+                  }
+                  startForegroundService(i); playing=true
+                  waveFreq.isRunning=true; waveL.isRunning=true; waveR.isRunning=true
+                  Toast.makeText(this,"پخش شروع شد",Toast.LENGTH_SHORT).show()
+              }
+              override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
+                  super.onActivityResult(requestCode,resultCode,data)
+                  if(requestCode==pickSongCode && resultCode==RESULT_OK) {
+                      songUri=data?.data
+                      if(songUri!=null) {
+                          try { contentResolver.takePersistableUriPermission(songUri!!,Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_:Exception) {}
+                          songButton.text="آهنگ انتخاب شد ✓"
+                      }
+                  }
+              }
+          }
+          
+          private class RangeBar(context:android.content.Context, low0:Int, high0:Int, val changed:(Int,Int)->Unit):View(context) {
+              var low=low0; private set
+              var high=high0; private set
+              private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
+              private val density=resources.displayMetrics.density
+              init { isFocusable=true }
+              override fun onDraw(c:Canvas) {
+                  super.onDraw(c); val pad=dp(18f); val y=height/2f; val w=(width-2*pad).coerceAtLeast(1f)
+                  paint.color=Color.rgb(55,65,90); paint.strokeWidth=dp(5f); c.drawLine(pad,y,pad+w,y,paint)
+                  paint.color=Color.rgb(103,153,255); c.drawLine(pad+w*low/100f,y,pad+w*high/100f,y,paint)
+                  paint.color=Color.WHITE; c.drawCircle(pad+w*low/100f,y,dp(9f),paint); c.drawCircle(pad+w*high/100f,y,dp(9f),paint)
+                  paint.textSize=dp(12f); c.drawText("حداقل $low%",pad,y-dp(13f),paint); c.drawText("حداکثر $high%",(pad+w*high/100f-dp(75f)).coerceAtLeast(pad),y+dp(26f),paint)
+              }
+              private fun dp(v:Float)=v*density
+              override fun onTouchEvent(e:android.view.MotionEvent):Boolean {
+                  if(e.action==android.view.MotionEvent.ACTION_DOWN || e.action==android.view.MotionEvent.ACTION_MOVE) {
+                      val pad=dp(18f); val w=(width-2*pad).coerceAtLeast(1f); val v=(((e.x-pad)/w)*100).toInt().coerceIn(0,100)
+                      if(kotlin.math.abs(v-low)<=kotlin.math.abs(v-high)) low=v.coerceAtMost(high) else high=v.coerceAtLeast(low)
+                      invalidate(); changed(low,high); return true
+                  }
+                  return true
+              }
+          }
+          private class WaveView(context:android.content.Context):View(context) {
+              private val p=Paint(Paint.ANTI_ALIAS_FLAG)
+              private var base=200; private var diff=0; private var combined=false
+              private var ear=-1; private var low=20; private var high=80; private var synchronous=false; private var phase=0f
+              var isRunning=false
+                  set(v){field=v;invalidate()}
+              fun setParams(b:Int,d:Int,c:Boolean){base=b;diff=d;combined=c;invalidate()}
+              fun setParams(e:Int,l:Int,h:Int,s:Boolean){ear=e;low=l;high=h;synchronous=s;invalidate()}
+              override fun onDraw(c:Canvas) {
+                  super.onDraw(c); val w=width.toFloat(); val h=height.toFloat()
+                  p.color=Color.rgb(20,25,44); c.drawRoundRect(0f,0f,w,h,dp(12f),dp(12f),p)
+                  p.color=Color.rgb(40,49,77); p.strokeWidth=dp(1f); for(i in 1..3)c.drawLine(0f,h*i/4f,w,h*i/4f,p)
+                  val path=Path(); p.style=Paint.Style.STROKE; p.strokeWidth=dp(2.5f)
+                  p.color=if(ear==0) Color.rgb(103,153,255) else if(ear==1) Color.rgb(204,119,255) else Color.rgb(103,220,190)
+                  val cycles=if(ear>=0) 2.0 else (base/100.0).coerceIn(1.0,8.0)
+                  for(x in 0..width) {
+                      val t=x.toFloat()/width.coerceAtLeast(1)
+                      val wave=0.5+0.5*sin(phase.toDouble()+t.toDouble()*2*PI)
+                      val earWave=if(ear==0 && !synchronous) 1.0-wave else wave
+                      val amp=if(ear>=0) (low+(high-low)*earWave).toFloat()/100f else 0.33f
+                      val y=h/2f-sin(t.toDouble()*cycles*2*PI+phase.toDouble()).toFloat()*h*0.34f*amp
+                      if(x==0)path.moveTo(x.toFloat(),y) else path.lineTo(x.toFloat(),y)
+                  }
+                  c.drawPath(path,p); p.style=Paint.Style.FILL
+                  if(isRunning){phase+=0.12f;postInvalidateDelayed(33)}
+              }
+              private fun dp(v:Int)=(v*resources.displayMetrics.density)
+          }
+          KOTLIN
+
+          cat > app/src/main/java/com/sleeptune/app/PlaybackService.kt <<'KOTLIN'
+          package com.sleeptune.app
+          
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Intent
+          import android.media.AudioAttributes
+          import android.media.AudioFormat
+          import android.media.AudioTrack
+          import android.media.MediaPlayer
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import kotlin.math.PI
+          import kotlin.math.sin
+          import kotlin.math.cos
+          import java.util.concurrent.atomic.AtomicBoolean
+          import java.util.concurrent.atomic.AtomicInteger
+          import java.util.concurrent.atomic.AtomicLong
+          
+          class PlaybackService:Service() {
+              companion object {
+                  const val ACTION_START="com.sleeptune.START"
+                  const val ACTION_UPDATE="com.sleeptune.UPDATE"
+                  const val ACTION_STOP="com.sleeptune.STOP"
+                  const val EXTRA_BASE="base"; const val EXTRA_DIFF="diff"; const val EXTRA_MODE="mode"
+                  const val EXTRA_SWAP_MS="swapMs"; const val EXTRA_SONG="song"; const val EXTRA_DURATION_MS="durationMs"
+                  const val EXTRA_TONE_MIN="toneMin"; const val EXTRA_TONE_MAX="toneMax"; const val EXTRA_TONE_PATTERN="tonePattern"
+                  const val EXTRA_SONG_MIN="songMin"; const val EXTRA_SONG_MAX="songMax"; const val EXTRA_SONG_PATTERN="songPattern"
+                  const val EXTRA_SONG_SWAP_MS="songSwapMs"
+                  private const val CHANNEL_ID="sleeptune_audio"
+              }
+              private val running=AtomicBoolean(false)
+              private val baseHz=AtomicInteger(200); private val diffHz=AtomicInteger(0); private val mode=AtomicInteger(0)
+              private val swapMs=AtomicLong(1000); private val toneMin=AtomicInteger(20); private val toneMax=AtomicInteger(80); private val tonePattern=AtomicInteger(0)
+              private val songMin=AtomicInteger(20); private val songMax=AtomicInteger(80); private val songPattern=AtomicInteger(0); private val songSwapMs=AtomicLong(1000)
+              private val handler=Handler(Looper.getMainLooper())
+              private var track:AudioTrack?=null; private var audioThread:Thread?=null; private var player:MediaPlayer?=null
+              override fun onBind(intent:Intent?):IBinder?=null
+              override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
+                  createNotificationChannel(); startForeground(11,buildNotification())
+                  when(intent?.action) {
+                      ACTION_START -> {
+                          stopAudioAndSong(); updateParams(intent); running.set(true)
+                          val song=intent.getStringExtra(EXTRA_SONG).orEmpty()
+                          val duration=intent.getLongExtra(EXTRA_DURATION_MS,1_800_000L)
+                          if(song.isNotBlank()) playSongThenTone(song,duration) else startTone()
+                      }
+                      ACTION_UPDATE -> { updateParams(intent); updateSongVolume() }
+                      ACTION_STOP -> stopPlayback()
+                  }
+                  return START_NOT_STICKY
+              }
+              private fun updateParams(i:Intent) {
+                  val b=i.getIntExtra(EXTRA_BASE,baseHz.get()).coerceIn(50,800)
+                  baseHz.set(b); mode.set(i.getIntExtra(EXTRA_MODE,mode.get()).coerceIn(0,2))
+                  diffHz.set(i.getIntExtra(EXTRA_DIFF,diffHz.get()).coerceAtLeast(0).coerceAtMost(b-1))
+                  swapMs.set(i.getLongExtra(EXTRA_SWAP_MS,swapMs.get()).coerceIn(200,10000))
+                  toneMin.set(i.getIntExtra(EXTRA_TONE_MIN,toneMin.get()).coerceIn(0,100))
+                  toneMax.set(i.getIntExtra(EXTRA_TONE_MAX,toneMax.get()).coerceIn(toneMin.get(),100))
+                  tonePattern.set(i.getIntExtra(EXTRA_TONE_PATTERN,tonePattern.get()).coerceIn(0,1))
+                  songMin.set(i.getIntExtra(EXTRA_SONG_MIN,songMin.get()).coerceIn(0,100))
+                  songMax.set(i.getIntExtra(EXTRA_SONG_MAX,songMax.get()).coerceIn(songMin.get(),100))
+                  songPattern.set(i.getIntExtra(EXTRA_SONG_PATTERN,songPattern.get()).coerceIn(0,1))
+                  songSwapMs.set(i.getLongExtra(EXTRA_SONG_SWAP_MS,songSwapMs.get()).coerceIn(200,10000))
+              }
+              private fun playSongThenTone(uri:String,duration:Long) {
+                  try {
+                      val mp=MediaPlayer(); player=mp
+                      mp.setDataSource(this,Uri.parse(uri))
+                      mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                      mp.isLooping=true
+                      mp.setOnPreparedListener { ready ->
+                          if(!running.get()){ready.release();return@setOnPreparedListener}
+                          ready.start(); updateSongVolume()
+                          val started=System.currentTimeMillis()
+                          val updater=object:Runnable {
+                              override fun run() {
+                                  if(!running.get() || player!==ready) return
+                                  updateSongVolume()
+                                  if(System.currentTimeMillis()-started>=duration) {
+                                      try { ready.stop();ready.release() } catch (_:Exception) {}
+                                      player=null; startTone()
+                                  } else handler.postDelayed(this,40)
+                              }
+                          }
+                          handler.post(updater)
+                      }
+                      mp.setOnErrorListener { _,_,_-> try{mp.release()}catch(_:Exception){};player=null;startTone();true }
+                      mp.prepareAsync()
+                  } catch(_:Exception) { startTone() }
+              }
+              private fun updateSongVolume() {
+                  val mp=player ?: return
+                  val t=System.currentTimeMillis().toDouble()/1000.0
+                  val period=(songSwapMs.get().coerceIn(200,10000)/1000.0).coerceAtLeast(0.2)
+                  val wave=(0.5+0.5*sin(2*PI*t/period))
+                  val lo=songMin.get()/100.0; val hi=songMax.get()/100.0
+                  val a=(lo+(hi-lo)*wave).toFloat()
+                  val b=if(songPattern.get()==0) (lo+(hi-lo)*(1-wave)).toFloat() else a
+                  try { mp.setVolume(a,b) } catch(_:Exception) {}
+              }
+              private fun startTone() {
+                  if(!running.get() || audioThread?.isAlive==true) return
+                  val sr=44100
+                  val min=AudioTrack.getMinBufferSize(sr,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
+                  val audio=AudioTrack.Builder()
+                      .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                      .setAudioFormat(AudioFormat.Builder().setSampleRate(sr).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                      .setBufferSizeInBytes(min*2).setTransferMode(AudioTrack.MODE_STREAM).build()
+                  track=audio; audio.play()
+                  audioThread=Thread {
+                      val frames=1024; val buf=ShortArray(frames*2); var pl=0.0; var pr=0.0; var count=0L
+                      while(running.get()) {
+                          val base=baseHz.get().coerceIn(50,800); val diff=diffHz.get().coerceAtMost(base-1)
+                          val m=mode.get(); val period=(swapMs.get().coerceIn(200,10000)*sr/1000L).coerceAtLeast(1)
+                          val lo=toneMin.get()/100.0; val hi=toneMax.get()/100.0
+                          for(i in 0 until frames) {
+                              val cyc=(count.toDouble()/period.toDouble())
+                              val phase=(count.toDouble()/sr.toDouble())*2*PI
+                              val blend=(0.5-0.5*cos(2*PI*cyc)).coerceIn(0.0,1.0)
+                              val freqL:Double; val freqR:Double
+                              if(m==1 && diff>0) {
+                                  freqL=base+diff*blend
+                                  freqR=base+diff*(1-blend)
+                              } else { freqL=base.toDouble();freqR=base.toDouble() }
+                              val ampWave=0.5+0.5*sin(2*PI*cyc)
+                              val ampL:Double; val ampR:Double
+                              if(m==1) {
+                                  ampL=lo+(hi-lo)*blend
+                                  ampR=lo+(hi-lo)*(1-blend)
+                              } else if(m==2) {
+                                  ampL=lo+(hi-lo)*ampWave
+                                  ampR=if(tonePattern.get()==0) lo+(hi-lo)*(1-ampWave) else ampL
+                              } else { ampL=hi; ampR=hi }
+                              pl+=2*PI*freqL/sr; pr+=2*PI*freqR/sr
+                              if(pl>=2*PI)pl-=2*PI; if(pr>=2*PI)pr-=2*PI
+                              buf[i*2]=(sin(pl)*Short.MAX_VALUE*ampL*0.65).toInt().toShort()
+                              buf[i*2+1]=(sin(pr)*Short.MAX_VALUE*ampR*0.65).toInt().toShort()
+                              count++
+                          }
+                          try { audio.write(buf,0,buf.size) } catch(_:Exception) { break }
+                      }
+                      try { audio.pause();audio.flush();audio.stop();audio.release() } catch(_:Exception) {}
+                      if(track===audio) track=null
+                  }.apply { name="SleepTune-Audio"; start() }
+              }
+              private fun stopAudioAndSong() {
+                  running.set(false)
+                  try{player?.stop()}catch(_:Exception){};try{player?.release()}catch(_:Exception){};player=null
+                  val old=audioThread
+                  try{old?.join(600)}catch(_:InterruptedException){Thread.currentThread().interrupt()}
+                  try{track?.pause();track?.flush();track?.stop();track?.release()}catch(_:Exception){}
+                  track=null;audioThread=null
+              }
+              private fun stopPlayback() {
+                  running.set(false);handler.removeCallbacksAndMessages(null)
+                  try{player?.stop()}catch(_:Exception){};try{player?.release()}catch(_:Exception){};player=null
+                  try{track?.pause();track?.flush();track?.stop();track?.release()}catch(_:Exception){}
+                  track=null;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf()
+              }
+              private fun createNotificationChannel() {
+                  if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID,"SleepTune audio",NotificationManager.IMPORTANCE_LOW))
+              }
+              private fun buildNotification():Notification {
+                  val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                  return if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) Notification.Builder(this,CHANNEL_ID).setContentTitle("SleepTune").setContentText("پخش صدا فعال است").setSmallIcon(android.R.drawable.ic_media_play).setContentIntent(open).setOngoing(true).build()
+                  else {
+                      @Suppress("DEPRECATION")
+                      val builder = Notification.Builder(this)
+                      builder.setContentTitle("SleepTune").setContentText("پخش صدا فعال است").setSmallIcon(android.R.drawable.ic_media_play).setContentIntent(open).setOngoing(true).build()
+                  }
+              }
+              override fun onDestroy(){stopPlayback();super.onDestroy()}
+          }
+          KOTLIN
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK
+        run: test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SleepTune-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
