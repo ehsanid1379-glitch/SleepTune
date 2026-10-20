@@ -261,8 +261,8 @@ jobs:
               private fun updateGraphs() {
                   val mode=modeGroup.checkedRadioButtonId.let { id -> (0 until modeGroup.childCount).firstOrNull { modeGroup.getChildAt(it).id==id } ?: 0 }
                   waveFreq.setParams(baseSeek.progress+50,if(mode==1) diffSeek.progress else 0,mode==1)
-                  waveL.setParams(0,toneRange.low,toneRange.high,tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
-                  waveR.setParams(1,toneRange.low,toneRange.high,tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
+                  waveL.setParams(0,toneRange.low.toInt(),toneRange.high.toInt(),tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
+                  waveR.setParams(1,toneRange.low.toInt(),toneRange.high.toInt(),tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id)
               }
               private fun updatePlaying() {
                   updateGraphs()
