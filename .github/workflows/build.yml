@@ -348,7 +348,7 @@ jobs:
               var isRunning=false
                   set(v){field=v;invalidate()}
               fun setParams(b:Int,d:Int,c:Boolean){base=b;diff=d;combined=c;invalidate()}
-              fun setParams(e:Int,l:Int,h:Int,s:Boolean){ear=e;low=l;high=h;synchronous=s;invalidate()}
+              fun setParams(e:Int,l:Float,h:Float,s:Boolean){ear=e;low=l.toInt();high=h.toInt();synchronous=s;invalidate()}
               override fun onDraw(c:Canvas) {
                   super.onDraw(c); val w=width.toFloat(); val h=height.toFloat()
                   p.color=Color.rgb(20,25,44); c.drawRoundRect(0f,0f,w,h,dp(12f),dp(12f),p)
