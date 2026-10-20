@@ -138,7 +138,7 @@ jobs:
                   window.navigationBarColor = Color.rgb(13,16,29)
                   buildUi()
               }
-              private fun dp(v:Float)=(v*resources.displayMetrics.density)
+              private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
               private fun full() = LinearLayout.LayoutParams(-1, -2)
               private fun title(s:String) = TextView(this).apply {
                   text=s; textSize=16f; typeface=Typeface.create("sans-serif-medium",Typeface.BOLD)
