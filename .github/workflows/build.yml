@@ -294,8 +294,8 @@ jobs:
                       action=PlaybackService.ACTION_START
                       putExtra(PlaybackService.EXTRA_BASE,base); putExtra(PlaybackService.EXTRA_DIFF,if(mode==1) diff else 0)
                       putExtra(PlaybackService.EXTRA_MODE,mode); putExtra(PlaybackService.EXTRA_SWAP_MS,secondsMs(speedSeek.progress))
-                      putExtra(PlaybackService.EXTRA_TONE_MIN,toneRange.low.toInt())
-                      putExtra(PlaybackService.EXTRA_TONE_MAX,toneRange.high.toInt())
+                      putExtra(PlaybackService.EXTRA_TONE_MIN,toneRange.low)
+                      putExtra(PlaybackService.EXTRA_TONE_MAX,toneRange.high)
                       putExtra(PlaybackService.EXTRA_TONE_PATTERN,if(tonePattern.checkedRadioButtonId==tonePattern.getChildAt(1).id) 1 else 0)
                       putExtra(PlaybackService.EXTRA_SONG_MIN,songRange.low); putExtra(PlaybackService.EXTRA_SONG_MAX,songRange.high)
                       putExtra(PlaybackService.EXTRA_SONG_PATTERN,if(songPattern.checkedRadioButtonId==songPattern.getChildAt(1).id) 1 else 0)
