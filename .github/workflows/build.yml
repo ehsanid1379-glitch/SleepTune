@@ -369,7 +369,8 @@ jobs:
                   c.drawPath(path,p); p.style=Paint.Style.FILL
                   if(isRunning){phase+=0.12f;postInvalidateDelayed(33)}
               }
-              private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
+              private fun dp(v:Int):Int = (v * resources.displayMetrics.density).toInt()
+              private fun dp(v:Float):Float = v * resources.displayMetrics.density
           }
           KOTLIN
 
